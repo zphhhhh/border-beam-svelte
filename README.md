@@ -4,6 +4,8 @@ Animated border beam effect for **Svelte 5**. A lightweight component that adds 
 traveling or breathing glow animation around any element — cards, buttons, inputs,
 or search bars.
 
+**🔗 Live demo: https://zphhhhh.github.io/border-beam-svelte/**
+
 This is a faithful port of the [`border-beam`](https://github.com/Jakubantalik/border-beam)
 React component. It reuses the original's framework-agnostic CSS engine verbatim,
 so the visual output (every size, color variant, theme, and animation) matches
