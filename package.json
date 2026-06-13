@@ -46,5 +46,13 @@
     "effect",
     "css"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zphhhhh/border-beam-svelte.git"
+  },
+  "homepage": "https://zphhhhh.github.io/border-beam-svelte/",
+  "bugs": {
+    "url": "https://github.com/zphhhhh/border-beam-svelte/issues"
+  }
 }
