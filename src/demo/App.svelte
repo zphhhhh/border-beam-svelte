@@ -1,134 +1,372 @@
 <script lang="ts">
-  import { BorderBeam, type BorderBeamColorVariant, type BorderBeamTheme } from '$lib';
+  import { BorderBeam, type BorderBeamSize, type BorderBeamColorVariant } from '$lib';
+  import Mock from './Mock.svelte';
+  import CopyButton from './CopyButton.svelte';
 
-  let colorVariant = $state<BorderBeamColorVariant>('colorful');
-  let theme = $state<Exclude<BorderBeamTheme, 'auto'>>('dark');
-  let active = $state(true);
-  let strength = $state(1);
+  type BeamFamily = 'rotate' | 'pulse';
+  type ThemeMode = 'dark' | 'light';
 
-  const variants: BorderBeamColorVariant[] = ['colorful', 'mono', 'ocean', 'sunset'];
+  const FAMILY_OPTIONS: { value: BeamFamily; label: string }[] = [
+    { value: 'rotate', label: 'Rotate' },
+    { value: 'pulse', label: 'Pulse' }
+  ];
+
+  const ROTATE_SIZE_OPTIONS: { value: BorderBeamSize; label: string }[] = [
+    { value: 'md', label: 'Large' },
+    { value: 'sm', label: 'Small' },
+    { value: 'line', label: 'Line' }
+  ];
+
+  const PULSE_SIZE_OPTIONS: { value: BorderBeamSize; label: string }[] = [
+    { value: 'pulse-inner', label: 'Pulse Inner' },
+    { value: 'pulse-outside', label: 'Pulse Outside' }
+  ];
+
+  const SIZE_OPTIONS_BY_FAMILY: Record<BeamFamily, { value: BorderBeamSize; label: string }[]> = {
+    rotate: ROTATE_SIZE_OPTIONS,
+    pulse: PULSE_SIZE_OPTIONS
+  };
+
+  const DEFAULT_SIZE_BY_FAMILY: Record<BeamFamily, BorderBeamSize> = {
+    rotate: 'md',
+    pulse: 'pulse-inner'
+  };
+
+  const COLOR_OPTIONS: { value: BorderBeamColorVariant; label: string }[] = [
+    { value: 'colorful', label: 'Colorful' },
+    { value: 'mono', label: 'Mono' },
+    { value: 'ocean', label: 'Ocean' },
+    { value: 'sunset', label: 'Sunset' }
+  ];
+
+  // URL <-> tab mapping. `/pulse` deep-links to the Pulse tab; everything else
+  // (including `/`) is Rotate.
+  function familyFromPath(pathname: string): BeamFamily {
+    return /\/pulse\/?$/i.test(pathname) ? 'pulse' : 'rotate';
+  }
+  function pathForFamily(family: BeamFamily): string {
+    return family === 'pulse' ? '/pulse' : '/';
+  }
+
+  function getInitialTheme(): ThemeMode {
+    const fromAttr = document.documentElement.dataset.theme;
+    if (fromAttr === 'light' || fromAttr === 'dark') return fromAttr;
+    const stored = localStorage.getItem('theme');
+    return stored === 'light' ? 'light' : 'dark';
+  }
+
+  let family = $state<BeamFamily>(familyFromPath(window.location.pathname));
+  let playgroundActive = $state(true);
+  let playgroundSize = $state<BorderBeamSize>(
+    DEFAULT_SIZE_BY_FAMILY[familyFromPath(window.location.pathname)]
+  );
+  let playgroundColorVariant = $state<BorderBeamColorVariant>('colorful');
+  let playgroundStrength = $state(70);
+  let theme = $state<ThemeMode>(getInitialTheme());
+
+  const sizeOptions = $derived(SIZE_OPTIONS_BY_FAMILY[family]);
+  const isPulse = $derived(family === 'pulse');
+  const rotateTabActive = $derived(family === 'rotate');
+  const pulseTabActive = $derived(family === 'pulse');
+
+  // Reflect the active theme on <html> and persist the choice.
+  $effect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('theme', theme);
+  });
 
   function toggleTheme() {
     theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = theme;
   }
 
-  // Shared props spread into every demo instance.
-  const shared = $derived({ colorVariant, theme, active, strength });
+  function handleFamilyChange(next: BeamFamily) {
+    family = next;
+    playgroundSize = DEFAULT_SIZE_BY_FAMILY[next];
+    const path = pathForFamily(next);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+    }
+  }
+
+  // Keep the tab in sync with browser back/forward navigation.
+  $effect(() => {
+    const onPopState = () => {
+      const next = familyFromPath(window.location.pathname);
+      family = next;
+      playgroundSize = DEFAULT_SIZE_BY_FAMILY[next];
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  });
+
+  // Sliding tab pill — width + transform written inline so the transition tweens
+  // between the previous and next measured positions.
+  let tabListRef = $state<HTMLElement | null>(null);
+  let tabPillRef = $state<HTMLSpanElement | null>(null);
+  let tabPillReady = false;
+
+  function moveTabPill(animate: boolean) {
+    const pill = tabPillRef;
+    const list = tabListRef;
+    if (!pill || !list) return;
+    const activeTab = list.querySelector<HTMLButtonElement>('.tab-btn[data-active="true"]');
+    if (!activeTab) return;
+    if (!animate) {
+      const prev = pill.style.transition;
+      pill.style.transition = 'none';
+      pill.style.transform = `translateX(${activeTab.offsetLeft}px)`;
+      pill.style.width = `${activeTab.offsetWidth}px`;
+      void pill.offsetWidth; // force reflow before restoring
+      pill.style.transition = prev;
+    } else {
+      pill.style.transform = `translateX(${activeTab.offsetLeft}px)`;
+      pill.style.width = `${activeTab.offsetWidth}px`;
+    }
+  }
+
+  // Re-position the pill whenever the active family changes (snap on first paint,
+  // tween afterwards). Depend on `family` and the refs so it runs once mounted.
+  $effect(() => {
+    family;
+    tabListRef;
+    tabPillRef;
+    moveTabPill(tabPillReady);
+    tabPillReady = true;
+  });
+
+  $effect(() => {
+    const onResize = () => moveTabPill(false);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  const installCmd = 'npm install border-beam-svelte';
+  const usageCode = `<script>
+  import { BorderBeam } from 'border-beam-svelte';
+<\/script>
+
+<BorderBeam>
+  <YourCard>Content</YourCard>
+</BorderBeam>`;
+  const playgroundCode = $derived(
+    `<BorderBeam size="${playgroundSize}" colorVariant="${playgroundColorVariant}"${playgroundStrength < 100 ? ` strength={${playgroundStrength / 100}}` : ''}>
+  <Card>Content</Card>
+</BorderBeam>`
+  );
 </script>
 
-<div class="wrap">
-  <header class="hero">
-    <div>
-      <h1>Border Beam <span style="opacity:.4">/ Svelte</span></h1>
-      <p>
-        Animated border beam effect for Svelte 5. A faithful port of the
-        <code>border-beam</code> React component — same CSS engine, same presets,
-        traveling beams and breathing glows around any element.
-      </p>
+<a href="#main-content" class="skip-link">Skip to content</a>
+
+<main id="main-content" class="app">
+  <header class="header">
+    <nav aria-label="External links" class="top-bar-links">
+      <button
+        type="button"
+        class="icon-btn theme-toggle"
+        onclick={toggleTheme}
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        <span class="theme-icon-stack" data-active={theme === 'dark' ? 'sun' : 'moon'} aria-hidden="true">
+          <svg class="theme-icon theme-icon-moon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" d="M6.04458 1.60806C6.1589 1.35528 6.10472 1.05812 5.90855 0.861947C5.71237 0.665775 5.41522 0.611597 5.16244 0.725914C2.51258 1.92428 0.666626 4.59176 0.666626 7.69181C0.666626 11.9121 4.08786 15.3334 8.30817 15.3334C11.4082 15.3334 14.0757 13.4874 15.2741 10.8375C15.3884 10.5848 15.3342 10.2876 15.138 10.0914C14.9419 9.89526 14.6447 9.84108 14.3919 9.9554C13.6009 10.3131 12.7225 10.5126 11.7956 10.5126C8.31168 10.5126 5.4874 7.6883 5.4874 4.20438C5.4874 3.27752 5.68686 2.39905 6.04458 1.60806Z" />
+          </svg>
+          <svg class="theme-icon theme-icon-sun" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" d="M8.66663 1.33333C8.66663 0.965143 8.36815 0.666666 7.99996 0.666666C7.63177 0.666666 7.33329 0.965143 7.33329 1.33333V2.66667C7.33329 3.03486 7.63177 3.33333 7.99996 3.33333C8.36815 3.33333 8.66663 3.03486 8.66663 2.66667V1.33333Z" />
+            <path fill="currentColor" d="M8.66663 13.3333C8.66663 12.9651 8.36815 12.6667 7.99996 12.6667C7.63177 12.6667 7.33329 12.9651 7.33329 13.3333V14.6667C7.33329 15.0349 7.63177 15.3333 7.99996 15.3333C8.36815 15.3333 8.66663 15.0349 8.66663 14.6667V13.3333Z" />
+            <path fill="currentColor" d="M0.666626 8C0.666626 7.63181 0.965103 7.33333 1.33329 7.33333H2.66663C3.03482 7.33333 3.33329 7.63181 3.33329 8C3.33329 8.36819 3.03482 8.66667 2.66663 8.66667H1.33329C0.965103 8.66667 0.666626 8.36819 0.666626 8Z" />
+            <path fill="currentColor" d="M3.73797 2.7952C3.47762 2.53485 3.05551 2.53485 2.79516 2.7952C2.53481 3.05555 2.53481 3.47766 2.79516 3.73801L3.73797 4.68081C3.99831 4.94116 4.42042 4.94116 4.68077 4.68081C4.94112 4.42046 4.94112 3.99836 4.68077 3.73801L3.73797 2.7952Z" />
+            <path fill="currentColor" d="M13.2048 2.7952C13.4651 3.05555 13.4651 3.47766 13.2048 3.73801L12.262 4.68081C12.0016 4.94116 11.5795 4.94116 11.3192 4.68081C11.0588 4.42046 11.0588 3.99836 11.3192 3.73801L12.262 2.7952C12.5223 2.53485 12.9444 2.53485 13.2048 2.7952Z" />
+            <path fill="currentColor" d="M4.68077 12.2647C4.94112 12.0043 4.94112 11.5822 4.68077 11.3219C4.42042 11.0615 3.99831 11.0615 3.73797 11.3219L2.79516 12.2647C2.53481 12.525 2.53481 12.9472 2.79516 13.2075C3.05551 13.4679 3.47762 13.4679 3.73797 13.2075L4.68077 12.2647Z" />
+            <path fill="currentColor" d="M11.3192 11.3219C11.5795 11.0615 12.0016 11.0615 12.262 11.3219L13.2048 12.2647C13.4651 12.525 13.4651 12.9472 13.2048 13.2075C12.9444 13.4679 12.5223 13.4679 12.262 13.2075L11.3192 12.2647C11.0588 12.0043 11.0588 11.5822 11.3192 11.3219Z" />
+            <path fill="currentColor" d="M13.3333 7.33333C12.9651 7.33333 12.6666 7.63181 12.6666 8C12.6666 8.36819 12.9651 8.66667 13.3333 8.66667H14.6666C15.0348 8.66667 15.3333 8.36819 15.3333 8C15.3333 7.63181 15.0348 7.33333 14.6666 7.33333H13.3333Z" />
+            <path fill="currentColor" d="M7.99996 4C5.79082 4 3.99996 5.79086 3.99996 8C3.99996 10.2091 5.79082 12 7.99996 12C10.2091 12 12 10.2091 12 8C12 5.79086 10.2091 4 7.99996 4Z" />
+          </svg>
+        </span>
+      </button>
+      <a class="icon-btn" href="https://github.com/zphhhhh/border-beam-svelte" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+        </svg>
+      </a>
+    </nav>
+    <div class="header-icon" aria-hidden="true">
+      <img class="header-icon-img header-icon-img--dark" src="{import.meta.env.BASE_URL}icon-web.png" alt="" width={207} height={138} />
+      <img class="header-icon-img header-icon-img--light" src="{import.meta.env.BASE_URL}icon-web-light.png" alt="" width={207} height={138} />
     </div>
-    <button class="pill" onclick={toggleTheme}>
-      {theme === 'dark' ? '☾ Dark' : '☀ Light'}
-    </button>
+    <h1 class="title">Border beam</h1>
+    <p class="subtitle-sm">Animated border beam component for Svelte</p>
   </header>
 
-  <div class="toolbar">
-    <div class="group">
-      <span class="label">Color</span>
-      {#each variants as v}
-        <button class="pill" data-on={colorVariant === v} onclick={() => (colorVariant = v)}>
-          {v}
-        </button>
-      {/each}
-    </div>
-    <div class="group">
-      <span class="label">Play</span>
-      <button class="pill" data-on={active} onclick={() => (active = !active)}>
-        {active ? '⏸ Pause' : '▶ Play'}
+  <nav class="tab-nav" role="tablist" aria-label="Effect family" bind:this={tabListRef}>
+    <span class="tab-nav-pill" aria-hidden="true" bind:this={tabPillRef}></span>
+    {#each FAMILY_OPTIONS as { value, label } (value)}
+      <button
+        class="tab-btn"
+        role="tab"
+        aria-selected={family === value}
+        data-active={family === value}
+        onclick={() => handleFamilyChange(value)}
+      >
+        {label}
       </button>
-    </div>
-    <div class="group">
-      <span class="label">Strength</span>
-      <input type="range" min="0" max="1" step="0.05" bind:value={strength} />
-      <span class="cap">{strength.toFixed(2)}</span>
-    </div>
-  </div>
+    {/each}
+  </nav>
 
-  <div class="grid">
-    <div class="section-title">Rotate — traveling beam</div>
-
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="md" {...shared}>
-          <div class="card">
-            <div class="title">Border (md)</div>
-            <div class="body">Full traveling glow around a card. Auto-detects the child's border radius.</div>
-          </div>
+  <section class="examples-section t-page-slide" data-page={family === 'rotate' ? '1' : '2'} aria-label="Effect demonstrations">
+    <div class="t-page examples-page examples-page--rotate" data-page-id="1" aria-hidden={family !== 'rotate'}>
+      <div class="example-row-full">
+        <BorderBeam class="beam-host" size="md" colorVariant="colorful" {theme} active={rotateTabActive}>
+          <Mock kind="chat" />
         </BorderBeam>
       </div>
-      <span class="cap">size="md"</span>
+      <div class="example-row-split">
+        <div class="example-cell">
+          <BorderBeam class="beam-host" size="sm" colorVariant="colorful" {theme} active={rotateTabActive}>
+            <Mock kind="icon" />
+          </BorderBeam>
+        </div>
+        <div class="example-cell">
+          <BorderBeam class="beam-host" size="line" colorVariant="colorful" {theme} active={rotateTabActive} duration={3.1} borderRadius={20}>
+            <Mock kind="search" />
+          </BorderBeam>
+        </div>
+      </div>
     </div>
-
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="sm" {...shared}>
-          <div class="icon-btn">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14M12 5v14" />
-            </svg>
-          </div>
+    <div class="t-page examples-page examples-page--pulse" data-page-id="2" aria-hidden={family !== 'pulse'}>
+      <div class="example-row-full">
+        <BorderBeam class="beam-host beam-host--soft" size="pulse-inner" colorVariant="colorful" {theme} active={pulseTabActive}>
+          <Mock kind="working" />
         </BorderBeam>
       </div>
-      <span class="cap">size="sm"</span>
-    </div>
-
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="line" {...shared}>
-          <div class="search">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-            </svg>
-            <input placeholder="Search…" />
-          </div>
-        </BorderBeam>
+      <div class="example-row-split">
+        <div class="example-cell">
+          <BorderBeam class="beam-host beam-host--pill" size="pulse-inner" colorVariant="colorful" {theme} active={pulseTabActive}>
+            <Mock kind="subscribe" />
+          </BorderBeam>
+        </div>
+        <div class="example-cell">
+          <BorderBeam class="beam-host" size="pulse-outside" colorVariant="colorful" {theme} active={pulseTabActive}>
+            <Mock kind="chat" />
+          </BorderBeam>
+        </div>
       </div>
-      <span class="cap">size="line"</span>
     </div>
+  </section>
 
-    <div class="section-title">Pulse — breathing glow</div>
+  <section class="section" aria-label="Installation">
+    <h2 class="section-title">Installation</h2>
+    <div class="code-block">
+      <code>{installCmd}</code>
+      <CopyButton text={installCmd} label="Copy install command" />
+    </div>
+  </section>
 
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="pulse-inner" {...shared}>
-          <div class="card">
-            <div class="title">Pulse Inner</div>
-            <div class="body">Contained breathing glow that stays within the element's border.</div>
-          </div>
-        </BorderBeam>
+  <section class="section" aria-label="Usage">
+    <h2 class="section-title section-title--muted">Usage</h2>
+    <div class="code-block code-block--multi">
+      <code>{usageCode}</code>
+      <CopyButton text={usageCode} label="Copy usage example" />
+    </div>
+  </section>
+
+  <section class="playground-section" aria-label="Interactive playground">
+    <h2 class="section-title">Playground</h2>
+
+    <div class="playground-controls">
+      <div class="control-group" role="radiogroup" aria-label="Effect type">
+        <span class="control-label">Type</span>
+        <div class="control-options">
+          {#each sizeOptions as { value, label } (value)}
+            <button
+              class="tab-btn"
+              role="radio"
+              aria-checked={playgroundSize === value}
+              data-active={playgroundSize === value}
+              onclick={() => (playgroundSize = value)}
+            >
+              {label}
+            </button>
+          {/each}
+        </div>
       </div>
-      <span class="cap">size="pulse-inner"</span>
+
+      <div class="control-group" role="radiogroup" aria-label="Color variant">
+        <span class="control-label">Color</span>
+        <div class="control-options">
+          {#each COLOR_OPTIONS as { value, label } (value)}
+            <button
+              class="tab-btn"
+              role="radio"
+              aria-checked={playgroundColorVariant === value}
+              data-active={playgroundColorVariant === value}
+              onclick={() => (playgroundColorVariant = value)}
+            >
+              {label}
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="control-group control-group--strength">
+        <span class="control-label">Strength</span>
+        <div class="strength-track">
+          {#if playgroundStrength > 0}
+            <div class="strength-fill" style="width: {playgroundStrength}%"></div>
+          {/if}
+          <span class="strength-value">{playgroundStrength}%</span>
+          <input
+            type="range"
+            class="strength-input"
+            bind:value={playgroundStrength}
+            min={0}
+            max={100}
+            step={1}
+            aria-label="Effect strength"
+          />
+        </div>
+      </div>
     </div>
 
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="pulse-outside" {...shared}>
-          <div class="card">
-            <div class="title">Pulse Outside</div>
-            <div class="body">Outward-blooming halo that radiates beyond the (opaque) element.</div>
-          </div>
-        </BorderBeam>
+    <div class="playground-preview{isPulse ? ' playground-preview--pulse' : ''}">
+      <BorderBeam
+        size={playgroundSize}
+        colorVariant={playgroundColorVariant}
+        {theme}
+        active={playgroundActive}
+        strength={playgroundStrength / 100}
+      >
+        <div class="card {playgroundSize === 'sm' ? 'card-sm' : 'card-md'}">
+          <p class="card-text">{playgroundSize === 'sm' ? '' : 'Build anything...'}</p>
+        </div>
+      </BorderBeam>
+
+      <div class="playground-toolbar">
+        <button
+          type="button"
+          class="playground-toggle"
+          onclick={() => (playgroundActive = !playgroundActive)}
+          aria-pressed={playgroundActive}
+          aria-label={playgroundActive ? 'Pause animation' : 'Play animation'}
+          title={playgroundActive ? 'Pause' : 'Play'}
+        >
+          {#if playgroundActive}
+            <svg aria-hidden="true" viewBox="0 0 16 16"><rect x="4" y="3" width="3" height="10" rx="1" /><rect x="9" y="3" width="3" height="10" rx="1" /></svg>
+          {:else}
+            <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M4.5 2.5v11l9-5.5z" /></svg>
+          {/if}
+        </button>
       </div>
-      <span class="cap">size="pulse-outside"</span>
     </div>
 
-    <div class="cell">
-      <div class="stage">
-        <BorderBeam size="md" {...shared}>
-          <button class="btn">Subscribe</button>
-        </BorderBeam>
-      </div>
-      <span class="cap">md · button</span>
+    <div class="code-block code-block--multi">
+      <code>{playgroundCode}</code>
+      <CopyButton text={playgroundCode} label="Copy playground code" />
     </div>
-  </div>
-</div>
+  </section>
+
+  <footer class="footer">
+    <span class="footer-muted">Svelte port of</span>
+    <a class="footer-name" href="https://github.com/Jakubantalik/border-beam" target="_blank" rel="noopener noreferrer">border-beam</a>
+    <span class="footer-muted">by Jakub Antalik</span>
+  </footer>
+</main>
